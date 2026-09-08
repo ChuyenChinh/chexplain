@@ -7,6 +7,7 @@ from PIL import Image
 class CustomXRayDataset(Dataset):
     def __init__(self,img_dir='None',label_dir='None',transforms='None'):
         df = pd.read_csv(label_dir)
+        df.fillna(0)
         df['Path'] = df['Path'].str.replace('CheXpert-v1.0-small','chexpert')
         
         labels_name = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pleural Effusion']
