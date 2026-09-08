@@ -9,8 +9,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision import models   
 from feature import get_dataloader
 from loss_criterion import MaskedBCELogitLoss
+import psutil
 
-
+def print_mem(tag=""):
+    process = psutil.Process(os.getpid())
+    rss = process.memory_info().rss / 1024**2  # MB
+    print(f"[{tag}] RAM used: {rss:.2f} MB")
 
 def setup():
     device = torch.accelerator.current_accelerator()
@@ -87,7 +91,7 @@ class Trainer:
                     self.model.eval()
                 running_loss = 0.0
                 local_samples = 0
-                for inputs,labels in self.dataloader[phase]:
+                for batch_idx , (inputs,labels) in enumerate(self.dataloader[phase]):
                     inputs = inputs.to(self.rank,non_blocking=True)
                     labels = labels.to(self.rank,non_blocking=True)
                     
@@ -105,6 +109,8 @@ class Trainer:
 
                     running_loss += loss.detach().item() * inputs.shape[0]
                     local_samples += inputs.shape[0]
+                    if self.rank == 0 and batch_idx % 50 == 0:
+                        print_mem()
 
                 loss_tensor = torch.tensor([running_loss,local_samples],dtype=torch.float64,device=self.rank)
                 dist.all_reduce(loss_tensor)
