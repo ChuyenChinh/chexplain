@@ -24,8 +24,8 @@ def get_dataloader():
           for x in ['train','valid']}
     
     dataloader = {
-        'train' : DataLoader(dataset['train'],batch_size=64,shuffle=False,sampler=DistributedSampler(dataset['train']),num_workers=1,pin_memory=False),
-        'valid' : DataLoader((dataset['valid']),batch_size=32,shuffle=False,sampler=DistributedSampler(dataset['valid'],shuffle=False),num_workers=1,pin_memory=False)
+        'train' : DataLoader(dataset['train'],batch_size=64,shuffle=False,sampler=DistributedSampler(dataset['train']),num_workers=0,pin_memory=False),
+        'valid' : DataLoader((dataset['valid']),batch_size=32,shuffle=False,sampler=DistributedSampler(dataset['valid'],shuffle=False),num_workers=0,pin_memory=False)
     }
     
     return dataloader
