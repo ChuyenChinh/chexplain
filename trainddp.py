@@ -151,10 +151,10 @@ def main(num_epochs,num_labels,u_policy):
     setup()
     model = models.densenet121(weights='IMAGENET1K_V1')
     in_features = model.classifier.in_features
-    model.classifier = nn.Sequential(nn.Dropout(0.3),nn.Linear(in_features, num_labels))
+    model.classifier = nn.Sequential(nn.Dropout(0.4),nn.Linear(in_features, num_labels))
     
     dataloader = get_dataloader(u_policy) 
-    optimizer = optim.AdamW(model.parameters(),weight_decay=1e-4,lr=5e-4)
+    optimizer = optim.AdamW(model.parameters(),weight_decay=1e-2,lr=1e-4)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=5,gamma=0.5)
     criterion = MaskedBCELogitLoss()
     
