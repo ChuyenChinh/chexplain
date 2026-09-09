@@ -10,6 +10,8 @@ from torchvision import models
 from feature import get_dataloader
 from loss_criterion import MaskedBCELogitLoss
 
+labels_name = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pleural Effusion']
+
 def setup():
     device = torch.accelerator.current_accelerator()
     backend = torch.distributed.get_default_backend_for_device(device)
@@ -70,7 +72,7 @@ class Trainer:
         torch.save(self.model.module.state_dict(),self.best_model_pth)
         
     def train(self,num_epochs):
-        auroc_score = MultilabelAUROC(num_labels=self.num_labels).to(self.rank) #DDP automatically synchronizes AUC amongst GPUs
+        auroc_score = MultilabelAUROC(num_labels=self.num_labels,average=None).to(self.rank) #DDP automatically synchronizes AUC amongst GPUs
         #early stopping
         patience = 4
         epochs_no_improve = 0
@@ -116,13 +118,16 @@ class Trainer:
                 if phase == 'train':
                     self.lr_scheduler.step()
                 else:
-                    epoch_auc = auroc_score.compute().item()
+                    epoch_auc = auroc_score.compute()
+                    macro_auc = epoch_auc.mean().item()
                     if self.rank == 0:
-                        print(f"Phase {phase}: Macro AUC = {epoch_auc:.4f}")
+                        for i, name in enumerate(labels_name):
+                            print(f"- {name}: {epoch_auc[i].item():.4f}")
+                        print(f"  Macro AUC = {macro_auc:.4f}")
                     auroc_score.reset()
                     
-                    if epoch_auc > self.best_auc:
-                        self.best_auc = epoch_auc
+                    if macro_auc > self.best_auc:
+                        self.best_auc = macro_auc
                         if self.rank == 0:
                             self.save_best_model()
                         epochs_no_improve = 0
