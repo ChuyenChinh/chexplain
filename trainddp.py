@@ -9,12 +9,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision import models   
 from feature import get_dataloader
 from loss_criterion import MaskedBCELogitLoss
-import psutil
-
-def print_mem(tag=""):
-    process = psutil.Process(os.getpid())
-    rss = process.memory_info().rss / 1024**2  # MB
-    print(f"[{tag}] RAM used: {rss:.2f} MB")
 
 def setup():
     device = torch.accelerator.current_accelerator()
@@ -34,7 +28,8 @@ class Trainer:
                  criterion,
                  num_labels,
                  snap_shots_path,
-                 best_model_pth
+                 best_model_pth,
+                 u_policy = 'ignore'
                 ):
         self.rank = int(os.environ['LOCAL_RANK'])
         self.model = model.to(self.rank)
@@ -43,10 +38,11 @@ class Trainer:
         self.lr_scheduler = lr_scheduler
         self.criterion = criterion
         self.num_labels = num_labels
-        self.snap_shots_path = snap_shots_path
+        self.snap_shots_path = snap_shots_path.replace('.pt',f"_{u_policy}.pt")
         self.start_epoch = 0
-        self.best_model_pth = best_model_pth
+        self.best_model_pth = best_model_pth.replace('.pt',f"_{u_policy}.pt")
         self.best_auc = 0.0
+        self.u_policy = u_policy
         if os.path.exists(snap_shots_path):
             self.load_snapshot(snap_shots_path)
         self.model = DDP(self.model,device_ids=[self.rank])
@@ -76,7 +72,9 @@ class Trainer:
         
     def train(self,num_epochs):
         auroc_score = MultilabelAUROC(num_labels=self.num_labels).to(self.rank) #DDP automatically synchronizes AUC amongst GPUs
-
+        #early stopping
+        patience = 4
+        epochs_no_improve = 0
         for epoch in range(self.start_epoch,num_epochs):
             if self.rank == 0:
                 print(f"\nEpoch {epoch+1}/{num_epochs}")
@@ -91,10 +89,15 @@ class Trainer:
                     self.model.eval()
                 running_loss = 0.0
                 local_samples = 0
-                for batch_idx , (inputs,labels) in enumerate(self.dataloader[phase]):
+                for inputs,labels in self.dataloader[phase]:
                     inputs = inputs.to(self.rank,non_blocking=True)
                     labels = labels.to(self.rank,non_blocking=True)
                     
+                    if self.u_policy == 'ones':
+                        labels[labels == -1] = 1
+                    elif self.u_policy == 'zeros':
+                        labels[labels == -1] = 0
+                        
                     with torch.set_grad_enabled(phase=='train'):
                         logits = self.model(inputs)
                         loss = self.criterion(logits,labels)
@@ -109,8 +112,6 @@ class Trainer:
 
                     running_loss += loss.detach().item() * inputs.shape[0]
                     local_samples += inputs.shape[0]
-                    if self.rank == 0 and batch_idx % 50 == 0:
-                        print_mem()
 
                 loss_tensor = torch.tensor([running_loss,local_samples],dtype=torch.float64,device=self.rank)
                 dist.all_reduce(loss_tensor)
@@ -126,28 +127,40 @@ class Trainer:
                     if self.rank == 0:
                         print(f"Phase {phase}: Macro AUC = {epoch_auc:.4f}")
                     auroc_score.reset()
-                
-                if self.rank == 0 and phase == 'valid':
+                    
                     if epoch_auc > self.best_auc:
                         self.best_auc = epoch_auc
-                        self.save_best_model()
-                    self.save_snapshot(epoch)
+                        if self.rank == 0:
+                            self.save_best_model()
+                        epochs_no_improve = 0
+                    else:
+                        epochs_no_improve += 1
+                        
+                    if self.rank == 0:
+                        self.save_snapshot(epoch)
+                    if epochs_no_improve >= patience:
+                        break
+            if epochs_no_improve >= patience:
+                if self.rank == 0:
+                    print(f"Early stopping at epoch{epoch+1}")
+                break  
+                
         if self.rank == 0:
             print(f"Best auc score = {self.best_auc}")
 
 
-def main(num_epochs,num_labels):
+def main(num_epochs,num_labels,u_policy):
     setup()
     model = models.densenet121(weights='IMAGENET1K_V1')
     in_features = model.classifier.in_features
-    model.classifier = nn.Linear(in_features, num_labels)
+    model.classifier = nn.Sequential(nn.Dropout(0.3),nn.Linear(in_features, num_labels))
     
     dataloader = get_dataloader() 
-    optimizer = optim.AdamW(model.parameters(),weight_decay=1e-4,lr=1e-4)
+    optimizer = optim.AdamW(model.parameters(),weight_decay=1e-4,lr=5e-4)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=5,gamma=0.5)
     criterion = MaskedBCELogitLoss()
     
-    trainer = Trainer(model, dataloader, optimizer, lr_scheduler, criterion, num_labels, snap_shots_path='snapshots.pt',best_model_pth='best.pt')
+    trainer = Trainer(model, dataloader, optimizer, lr_scheduler, criterion, num_labels, snap_shots_path='snapshots.pt',best_model_pth='best.pt',u_policy=u_policy)
     trainer.train(num_epochs)
     
     cleanup()
@@ -157,7 +170,8 @@ if __name__ == '__main__':
     import sys
     num_epochs = int(sys.argv[1])
     num_labels = int(sys.argv[2])
-    main(num_epochs,num_labels)
+    u_policy = sys.argv[3]
+    main(num_epochs,num_labels,u_policy)
         
 
 

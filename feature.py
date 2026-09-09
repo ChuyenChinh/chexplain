@@ -10,7 +10,8 @@ BASE_DIR = '/kaggle/input/datasets/ashery'
 def get_dataloader():
     data_transform = {'train' : transforms.Compose([
         transforms.Resize((224,224)),
-        transforms.RandomRotation(10),
+        transforms.RandomRotation((-10,10)),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
         transforms.ToTensor(),
         transforms.Normalize([0.5030,0.5030,0.5030],[0.2893,0.2893,0.2893])
     ]),
