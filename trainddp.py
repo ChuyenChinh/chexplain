@@ -29,7 +29,7 @@ class Trainer:
                  num_labels,
                  snap_shots_path,
                  best_model_pth,
-                 u_policy = 'ignore'
+                 u_policy
                 ):
         self.rank = int(os.environ['LOCAL_RANK'])
         self.model = model.to(self.rank)
@@ -42,7 +42,6 @@ class Trainer:
         self.start_epoch = 0
         self.best_model_pth = best_model_pth.replace('.pt',f"_{u_policy}.pt")
         self.best_auc = 0.0
-        self.u_policy = u_policy
         if os.path.exists(snap_shots_path):
             self.load_snapshot(snap_shots_path)
         self.model = DDP(self.model,device_ids=[self.rank])
@@ -90,14 +89,8 @@ class Trainer:
                 running_loss = 0.0
                 local_samples = 0
                 for inputs,labels in self.dataloader[phase]:
-                    inputs = inputs.to(self.rank,non_blocking=True)
-                    labels = labels.to(self.rank,non_blocking=True)
-                    
-                    if self.u_policy == 'ones':
-                        labels[labels == -1] = 1
-                    elif self.u_policy == 'zeros':
-                        labels[labels == -1] = 0
-                        
+                    inputs = inputs.to(self.rank)
+                    labels = labels.to(self.rank)
                     with torch.set_grad_enabled(phase=='train'):
                         logits = self.model(inputs)
                         loss = self.criterion(logits,labels)
@@ -155,7 +148,7 @@ def main(num_epochs,num_labels,u_policy):
     in_features = model.classifier.in_features
     model.classifier = nn.Sequential(nn.Dropout(0.3),nn.Linear(in_features, num_labels))
     
-    dataloader = get_dataloader() 
+    dataloader = get_dataloader(u_policy) 
     optimizer = optim.AdamW(model.parameters(),weight_decay=1e-4,lr=5e-4)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer,step_size=5,gamma=0.5)
     criterion = MaskedBCELogitLoss()

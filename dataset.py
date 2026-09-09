@@ -5,7 +5,7 @@ import torch
 from PIL import Image
 
 class CustomXRayDataset(Dataset):
-    def __init__(self,img_dir='None',label_dir='None',transforms='None'):
+    def __init__(self,img_dir='None',label_dir='None',transforms='None',u_policy='ignore'):
         df = pd.read_csv(label_dir)
         df = df.fillna(0)
         df['Path'] = df['Path'].str.replace('CheXpert-v1.0-small','chexpert')
@@ -13,7 +13,10 @@ class CustomXRayDataset(Dataset):
         labels_name = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pleural Effusion']
         self.paths = df['Path'].to_numpy(dtype=object)
         self.labels = df[labels_name].to_numpy(dtype='float32')
-        
+        if u_policy == 'ones':
+            self.labels[self.labels == -1] = 1
+        elif u_policy == 'zeros':
+            self.labels[self.labels == -1] = 0
         self.img_dir = img_dir
         self.transforms = transforms
     def __len__(self):
